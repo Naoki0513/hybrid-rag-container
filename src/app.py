@@ -37,7 +37,7 @@ LLM_MODEL_ID = os.environ["LLM_MODEL_ID"]
 LLM_PROMPT = os.environ["LLM_PROMPT"]
 EMBEDDING_MODEL_ID = "cohere.embed-multilingual-v3"
 QUERY_GENERATOR_MODEL_ID = "anthropic.claude-instant-v1"
-PARENT_CHUNK_SIZE = 20000
+PARENT_CHUNK_SIZE = 20000 
 CHILD_CHUNK_SIZE = 100
 
 app = App(
@@ -58,11 +58,13 @@ def generate_word_ngrams(text: str, i: int, j: int, binary: bool = False) -> Lis
 
 		text_splitter = RecursiveCharacterTextSplitter(chunk_size=20000, chunk_overlap=20)
 		texts = text_splitter.split_text(text)
+		logging.info(f"Split text into {len(texts)} chunks")
 		
 		tokens = []
 		for chunk in texts:
 			chunk_tokens = tokenizer_obj.tokenize(chunk, mode)
 			tokens.extend(chunk_tokens)
+		logging.info(f"Tokenized text into {len(tokens)} tokens")
 			
 		words = [token.surface() for token in tokens]
 		
@@ -75,6 +77,7 @@ def generate_word_ngrams(text: str, i: int, j: int, binary: bool = False) -> Lis
 		if binary:
 			ngrams = list(set(ngrams))
 			
+		logging.info(f"Generated {len(ngrams)} word n-grams")
 		return ngrams
 	
 	except Exception as e:
@@ -89,14 +92,14 @@ def create_retriever(texts: List[str]) -> BM25Retriever:
 	"""
 	BM25検索器を作成する関数。
 	"""
-	logging.info("Creating BM25 retriever")
+	logging.info(f"Creating BM25 retriever with {len(texts)} documents")
 	return BM25Retriever.from_texts(texts, preprocess_func=preprocess_func, k=BM25_TOP_K)
 
 def create_query_generator() -> LLMChain:
 	"""
 	質問文からキーワードを抽出するためのLLMチェーンを作成する関数。
-	"""
-	logging.info("Creating query generator LLM chain")
+	"""  
+	logging.info(f"Creating query generator LLM chain with model: {QUERY_GENERATOR_MODEL_ID}")
 	
 	llm = Bedrock(model_id=QUERY_GENERATOR_MODEL_ID, model_kwargs={"temperature": 0})
 	prompt = PromptTemplate(
@@ -106,11 +109,11 @@ def create_query_generator() -> LLMChain:
 <task>
 入力された文章から、以下の基準に従って重要な単語を抽出し、抽出された単語をスペースで区切って出力してください:
 <criteria>
-1. 固有名詞（人名、地名、組織名など）
+1. 固有名詞（人名、地名、組織名など） 
 2. 専門用語や業界特有の語彙
 3. 頻出する名詞や動詞（ただし、「こと」「もの」などの一般的な名詞は除く）
 4. カタカナ語や外来語
-5. 文章の主題に関連する語彙
+5. 文章の主題に関連する語彙  
 </criteria>
 </task>
 
@@ -121,7 +124,7 @@ CodeAnalyzerは、ソースコードの静的解析ツールです。コーデ�
 
 <output>
 CodeAnalyzer ソースコード 静的解析ツール コーディング規約 遵守状況 チェック バグ 脆弱性 検出 プログラミング言語 対応 開発チーム コード品質管理 サポート
-</output>
+</output>  
 </example>
 
 <input>
@@ -138,12 +141,12 @@ CodeAnalyzer ソースコード 静的解析ツール コーディング規約 �
 	return chain
 
 def get_empty_faiss_vectorstore(embedding: Embeddings, dim: int = None, **kwargs) -> FAISS:
-	logging.info("Creating empty FAISS vector store")
+	logging.info(f"Creating empty FAISS vector store with embedding model: {embedding.__class__.__name__}")
 	
 	dummy_text, dummy_id = "1", 1
 	
 	if not dim:
-		dummy_emb = embedding.query(dummy_text)
+		dummy_emb = embedding.query(dummy_text)  
 	else:
 		dummy_emb = [0] * dim
 		
@@ -155,11 +158,11 @@ def vectorize(relevant_documents: List[Document]) -> ParentDocumentRetriever:
 	"""
 	BM25で絞り込まれたドキュメントをベクトル化し、FAISSベクトルストアに格納する関数。
 	"""
-	logging.info("Vectorizing relevant documents")
+	logging.info(f"Vectorizing {len(relevant_documents)} relevant documents")
 	
 	embeddings = BedrockEmbeddings(model_id=EMBEDDING_MODEL_ID)
 	ID_KEY = "doc_id"
-	vectorstore = get_empty_faiss_vectorstore(embeddings, 1024)
+	vectorstore = get_empty_faiss_vectorstore(embeddings, 1024) 
 	store = InMemoryStore()
 	
 	parent_splitter = RecursiveCharacterTextSplitter(chunk_size=PARENT_CHUNK_SIZE)
@@ -171,7 +174,7 @@ def vectorize(relevant_documents: List[Document]) -> ParentDocumentRetriever:
 		child_splitter=child_splitter,
 		parent_splitter=parent_splitter,
 		id_key=ID_KEY,
-		search_kwargs={"k": VECTORSTORE_TOP_K}
+		search_kwargs={"k": VECTORSTORE_TOP_K}  
 	)
 	ids = [str(i) for i in range(len(relevant_documents))]
 	retriever.add_documents(relevant_documents, ids=ids)
@@ -181,16 +184,18 @@ def generate_llm_response(page_content: str, question: str) -> str:
 	"""
 	関連ドキュメントとユーザーの質問文を組み合わせてLLMにプロンプトを送信し、最終的な回答を生成する関数。
 	"""
-	logging.info("Generating LLM response")
+	logging.info(f"Generating LLM response with model: {LLM_MODEL_ID}")
 	
 	prompt_text = LLM_PROMPT + "\n" + page_content
+	logging.info(f"Prompt text: {prompt_text}")
 	
 	llm = BedrockChat(
 		model_id=LLM_MODEL_ID,
-		model_kwargs={"temperature": 0}
+		model_kwargs={"temperature": 0}  
 	)
 	
 	llm_response = llm.predict(text=prompt_text + "\n" + question)
+	logging.info(f"LLM response: {llm_response}")
 	return llm_response
 
 def get_json_from_file(file_path: str) -> dict:
@@ -226,6 +231,7 @@ def process_question(question: str) -> str:
 		return "Failed to split JSON data."
 	
 	texts = [json.dumps(item, ensure_ascii=False) for item in split_data]
+	logging.info(f"Loaded {len(texts)} documents from JSON")
 	
 	retriever = create_retriever(texts)
 	
@@ -234,19 +240,19 @@ def process_question(question: str) -> str:
 	rephrase_retriever = RePhraseQueryRetriever(retriever=retriever, llm_chain=query_generator)
 	
 	relevant_documents = rephrase_retriever.get_relevant_documents(question)
-	logging.info("Relevant documents:")
+	logging.info(f"Retrieved {len(relevant_documents)} relevant documents:")
 	for doc in relevant_documents:
-		logging.info(doc)
+		logging.info(f"Document ID: {doc.metadata['source']}, Content: {doc.page_content}")
 	
-	logging.info("Generated query from LLM:")
-	logging.info(rephrase_retriever.llm_chain.invoke(question))
+	generated_query = rephrase_retriever.llm_chain.invoke(question)
+	logging.info(f"Generated query from LLM: {generated_query}")
 	
 	retriever = vectorize(relevant_documents)
 	
 	final_docs = retriever.get_relevant_documents(question)
-	logging.info("Final documents:")
+	logging.info(f"Retrieved {len(final_docs)} final documents:")  
 	for doc in final_docs:
-		logging.info(doc)
+		logging.info(f"Document ID: {doc.metadata['source']}, Content: {doc.page_content}")
 	
 	if final_docs:
 		page_content = "\n".join([doc.page_content for doc in final_docs])
@@ -267,7 +273,7 @@ def lambda_handler(event, context):
 		logging.info("Detected x-slack-retry-num. Exiting to avoid processing a retry from Slack.")
 		return {
 			"statusCode": 200,
-			"body": json.dumps({"message": "Request identified as a retry, thus ignored."})
+			"body": json.dumps({"message": "Request identified as a retry, thus ignored."})  
 		}
 
 	if event.get('isBase64Encoded', False):
