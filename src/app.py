@@ -2,11 +2,9 @@ import base64
 import boto3
 import datetime
 import json
-import logging
 import os
 import pytz
 import re
-import sys
 from botocore.exceptions import ClientError
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -25,9 +23,6 @@ from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from sudachipy import dictionary, tokenizer
 from typing import List
-
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
 
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -51,20 +46,16 @@ def generate_word_ngrams(text: str, i: int, j: int, binary: bool = False) -> Lis
 	文字列を単語に分割し、指定した文字数のn-gramを生成する関数。
 	"""
 	try:
-		logging.info("Generating word n-grams")
-		
 		tokenizer_obj = dictionary.Dictionary(dict="full").create()
 		mode = tokenizer.Tokenizer.SplitMode.A
 
 		text_splitter = RecursiveCharacterTextSplitter(chunk_size=20000, chunk_overlap=20)
 		texts = text_splitter.split_text(text)
-		logging.info(f"Split text into {len(texts)} chunks")
 		
 		tokens = []
 		for chunk in texts:
 			chunk_tokens = tokenizer_obj.tokenize(chunk, mode)
 			tokens.extend(chunk_tokens)
-		logging.info(f"Tokenized text into {len(tokens)} tokens")
 			
 		words = [token.surface() for token in tokens]
 		
@@ -77,29 +68,28 @@ def generate_word_ngrams(text: str, i: int, j: int, binary: bool = False) -> Lis
 		if binary:
 			ngrams = list(set(ngrams))
 			
-		logging.info(f"Generated {len(ngrams)} word n-grams")
 		return ngrams
 	
 	except Exception as e:
-		logging.exception(f"Error in generate_word_ngrams: {str(e)}")
+		print(f"Error in generate_word_ngrams: {str(e)}")
 		return []
 
 def preprocess_func(text: str) -> List[str]:
-	logging.info(f"Preprocessing text: {text}")
+	print(f"Preprocessing text: {text}")
 	return generate_word_ngrams(text, 1, 1, True)
 
 def create_retriever(texts: List[str]) -> BM25Retriever:
 	"""
 	BM25検索器を作成する関数。
 	"""
-	logging.info(f"Creating BM25 retriever with {len(texts)} documents")
+	print("Creating BM25 retriever")
 	return BM25Retriever.from_texts(texts, preprocess_func=preprocess_func, k=BM25_TOP_K)
 
 def create_query_generator() -> LLMChain:
 	"""
 	質問文からキーワードを抽出するためのLLMチェーンを作成する関数。
 	"""  
-	logging.info(f"Creating query generator LLM chain with model: {QUERY_GENERATOR_MODEL_ID}")
+	print("Creating query generator LLM chain")
 	
 	llm = Bedrock(model_id=QUERY_GENERATOR_MODEL_ID, model_kwargs={"temperature": 0})
 	prompt = PromptTemplate(
@@ -141,7 +131,7 @@ CodeAnalyzer ソースコード 静的解析ツール コーディング規約 �
 	return chain
 
 def get_empty_faiss_vectorstore(embedding: Embeddings, dim: int = None, **kwargs) -> FAISS:
-	logging.info(f"Creating empty FAISS vector store with embedding model: {embedding.__class__.__name__}")
+	print("Creating empty FAISS vector store")
 	
 	dummy_text, dummy_id = "1", 1
 	
@@ -158,7 +148,7 @@ def vectorize(relevant_documents: List[Document]) -> ParentDocumentRetriever:
 	"""
 	BM25で絞り込まれたドキュメントをベクトル化し、FAISSベクトルストアに格納する関数。
 	"""
-	logging.info(f"Vectorizing {len(relevant_documents)} relevant documents")
+	print("Vectorizing relevant documents")
 	
 	embeddings = BedrockEmbeddings(model_id=EMBEDDING_MODEL_ID)
 	ID_KEY = "doc_id"
@@ -184,10 +174,9 @@ def generate_llm_response(page_content: str, question: str) -> str:
 	"""
 	関連ドキュメントとユーザーの質問文を組み合わせてLLMにプロンプトを送信し、最終的な回答を生成する関数。
 	"""
-	logging.info(f"Generating LLM response with model: {LLM_MODEL_ID}")
+	print("Generating LLM response")
 	
 	prompt_text = LLM_PROMPT + "\n" + page_content
-	logging.info(f"Prompt text: {prompt_text}")
 	
 	llm = BedrockChat(
 		model_id=LLM_MODEL_ID,
@@ -195,82 +184,81 @@ def generate_llm_response(page_content: str, question: str) -> str:
 	)
 	
 	llm_response = llm.predict(text=prompt_text + "\n" + question)
-	logging.info(f"LLM response: {llm_response}")
 	return llm_response
 
 def get_json_from_file(file_path: str) -> dict:
 	"""
 	JSONファイルからデータを読み込む関数。
 	"""
-	logging.info(f"Retrieving JSON data from file: {file_path}")
+	print(f"Retrieving JSON data from file: {file_path}")
 	
 	try:
 		with open(file_path, 'r', encoding='utf-8') as file:
 			json_data = json.load(file)
 		return json_data
 	except Exception as e:
-		logging.exception(f"Error in get_json_from_file: {str(e)}")
+		print(f"Error in get_json_from_file: {str(e)}")
 		return None
 
 def process_question(question: str) -> str:
-	"""
-	一連の処理を統合し、ユーザーの質問に対する最終的な回答を生成する関数。
-	"""
-	logging.info(f"Processing question: {question}")
-	
-	file_path = '/var/task/documents.json'
-	
-	logging.info("Retrieving JSON data from file...")
-	json_data = get_json_from_file(file_path)
+    """
+    一連の処理を統合し、ユーザーの質問に対する最終的な回答を生成する関数。
+    """
+    print(f"Processing question: {question}")
+    
+    file_path = '/var/task/documents.json'
+    
+    print("Retrieving JSON data from file...")
+    json_data = get_json_from_file(file_path)
 
-	if json_data is None:
-		return "Failed to retrieve JSON data."
-	
-	split_data = json_data["chunk"]
-	if not split_data:
-		return "Failed to split JSON data."
-	
-	texts = [json.dumps(item, ensure_ascii=False) for item in split_data]
-	logging.info(f"Loaded {len(texts)} documents from JSON")
-	
-	retriever = create_retriever(texts)
-	
-	query_generator = create_query_generator()
-	
-	rephrase_retriever = RePhraseQueryRetriever(retriever=retriever, llm_chain=query_generator)
-	
-	relevant_documents = rephrase_retriever.get_relevant_documents(question)
-	logging.info(f"Retrieved {len(relevant_documents)} relevant documents:")
-	for doc in relevant_documents:
-		logging.info(f"Document ID: {doc.metadata['source']}, Content: {doc.page_content}")
-	
-	generated_query = rephrase_retriever.llm_chain.invoke(question)
-	logging.info(f"Generated query from LLM: {generated_query}")
-	
-	retriever = vectorize(relevant_documents)
-	
-	final_docs = retriever.get_relevant_documents(question)
-	logging.info(f"Retrieved {len(final_docs)} final documents:")  
-	for doc in final_docs:
-		logging.info(f"Document ID: {doc.metadata['source']}, Content: {doc.page_content}")
-	
-	if final_docs:
-		page_content = "\n".join([doc.page_content for doc in final_docs])
-		llm_response = generate_llm_response(page_content, question)
-		return llm_response
-	else:
-		return "関連する回答が見つかりませんでした。"
+    if json_data is None:
+        return "Failed to retrieve JSON data."
+    
+    split_data = json_data["chunk"]
+    if not split_data:
+        return "Failed to split JSON data."
+    
+    texts = [json.dumps(item, ensure_ascii=False) for item in split_data]
+    
+    retriever = create_retriever(texts)
+    
+    query_generator = create_query_generator()
+    
+    rephrase_retriever = RePhraseQueryRetriever(retriever=retriever, llm_chain=query_generator)
+    
+    relevant_documents = rephrase_retriever.get_relevant_documents(question)
+    print("Relevant documents:")
+    for doc in relevant_documents:
+        print(doc)
+    
+    generated_query = rephrase_retriever.llm_chain.invoke(question)
+    print("Generated query from LLM:")
+    print(generated_query)
+    
+    retriever = vectorize(relevant_documents)
+    
+    final_docs = retriever.get_relevant_documents(question)
+    print("Final documents:")  
+    for doc in final_docs:
+        print(doc)
+    
+    if final_docs:
+        page_content = "\n".join([doc.page_content for doc in final_docs])
+        llm_response = generate_llm_response(page_content, question)
+        return llm_response
+    else:
+        return "関連する回答が見つかりませんでした。"
 
 def lambda_handler(event, context):
 	"""
 	Slackからのメンション付きの返信を受けて回答する処理を行う関数。
 	"""
-	logging.info(f"Received event: {json.dumps(event)}")
+	print(f"Received event: {json.dumps(event)}")
 
 	headers = event.get('headers', {})
 
 	if 'x-slack-retry-num' in headers:
-		logging.info("Detected x-slack-retry-num. Exiting to avoid processing a retry from Slack.")
+		print("Detected x-slack-retry-num. Exiting to avoid processing a retry from Slack.")
 		return {
 			"statusCode": 200,
 			"body": json.dumps({"message": "Request identified as a retry, thus ignored."})  
