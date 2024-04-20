@@ -31,7 +31,7 @@ VECTORSTORE_TOP_K = int(os.environ["VECTORSTORE_TOP_K"])
 LLM_MODEL_ID = os.environ["LLM_MODEL_ID"]
 LLM_PROMPT = os.environ["LLM_PROMPT"]
 EMBEDDING_MODEL_ID = "cohere.embed-multilingual-v3"
-QUERY_GENERATOR_MODEL_ID = "anthropic.claude-instant-v1"
+QUERY_GENERATOR_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
 PARENT_CHUNK_SIZE = 20000 
 CHILD_CHUNK_SIZE = 100
 
@@ -91,7 +91,7 @@ def create_query_generator() -> LLMChain:
 	"""  
 	print("Creating query generator LLM chain")
 	
-	llm = Bedrock(model_id=QUERY_GENERATOR_MODEL_ID, model_kwargs={"temperature": 0})
+	llm = BedrockChat(model_id=QUERY_GENERATOR_MODEL_ID, model_kwargs={"temperature": 0})
 	prompt = PromptTemplate(
 		input_variables=['question'],
 		template="""
@@ -122,6 +122,7 @@ CodeAnalyzer ソースコード 静的解析ツール コーディング規約 �
 </input>
 
 <output>
+入力された文章から、以下の基準に従って重要な単語を抽出します:
 </output>
 
 </prompt>
