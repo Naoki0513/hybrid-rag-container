@@ -2,9 +2,11 @@ import base64
 import boto3
 import datetime
 import json
+import logging
 import os
 import pytz
 import re
+import sys
 from botocore.exceptions import ClientError
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -14,15 +16,18 @@ from langchain.schema.embeddings import Embeddings
 from langchain.storage import InMemoryStore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
-from langchain_community.chat_models import BedrockChat
+from langchain_aws.chat_models import ChatBedrock
 from langchain.retrievers import ParentDocumentRetriever
 from langchain_community.embeddings import BedrockEmbeddings
-from langchain_community.llms import Bedrock
+from langchain_aws.llms import BedrockLLM
 from langchain_community.retrievers import BM25Retriever
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from sudachipy import dictionary, tokenizer
 from typing import List
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
 
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -46,7 +51,7 @@ def generate_word_ngrams(text: str, i: int, j: int, binary: bool = False) -> Lis
 	文字列を単語に分割し、指定した文字数のn-gramを生成する関数。
 	"""
 	try:
-		print(f"Generating word n-grams for text: {text}")
+		logging.info(f"Generating word n-grams")
 		
 		tokenizer_obj = dictionary.Dictionary(dict="full").create()
 		mode = tokenizer.Tokenizer.SplitMode.A
@@ -69,33 +74,31 @@ def generate_word_ngrams(text: str, i: int, j: int, binary: bool = False) -> Lis
 				
 		if binary:
 			ngrams = list(set(ngrams))
-
-		print(f"Generated {len(ngrams)} word n-grams")
 			
 		return ngrams
 	
 	except Exception as e:
-		print(f"Error in generate_word_ngrams: {str(e)}")
+		logging.exception(f"Error in generate_word_ngrams: {str(e)}")
 		return []
 
 def preprocess_func(text: str) -> List[str]:
-	print(f"Preprocessing text: {text}")
+	logging.info(f"Preprocessing text: {text}")
 	return generate_word_ngrams(text, 1, 1, True)
 
 def create_retriever(texts: List[str]) -> BM25Retriever:
 	"""
 	BM25検索器を作成する関数。
 	"""
-	print("Creating BM25 retriever")
+	logging.info("Creating BM25 retriever")
 	return BM25Retriever.from_texts(texts, preprocess_func=preprocess_func, k=BM25_TOP_K)
 
 def create_query_generator() -> LLMChain:
 	"""
 	質問文からキーワードを抽出するためのLLMチェーンを作成する関数。
 	"""  
-	print("Creating query generator LLM chain")
+	logging.info("Creating query generator LLM chain")
 	
-	llm = Bedrock(model_id=QUERY_GENERATOR_MODEL_ID, model_kwargs={"temperature": 0})
+	llm = BedrockLLM(model_id=QUERY_GENERATOR_MODEL_ID, model_kwargs={"temperature": 0})
 	prompt = PromptTemplate(
 		input_variables=['question'],
 		template="""
@@ -135,7 +138,7 @@ CodeAnalyzer ソースコード 静的解析ツール コーディング規約 �
 	return chain
 
 def get_empty_faiss_vectorstore(embedding: Embeddings, dim: int = None, **kwargs) -> FAISS:
-	print("Creating empty FAISS vector store")
+	logging.info("Creating empty FAISS vector store")
 	
 	dummy_text, dummy_id = "1", 1
 	
@@ -152,7 +155,7 @@ def vectorize(relevant_documents: List[Document]) -> ParentDocumentRetriever:
 	"""
 	BM25で絞り込まれたドキュメントをベクトル化し、FAISSベクトルストアに格納する関数。
 	"""
-	print("Vectorizing relevant documents")
+	logging.info("Vectorizing relevant documents")
 	
 	embeddings = BedrockEmbeddings(model_id=EMBEDDING_MODEL_ID)
 	ID_KEY = "doc_id"
@@ -178,41 +181,41 @@ def generate_llm_response(page_content: str, question: str) -> str:
 	"""
 	関連ドキュメントとユーザーの質問文を組み合わせてLLMにプロンプトを送信し、最終的な回答を生成する関数。
 	"""
-	print("Generating LLM response")
+	logging.info("Generating LLM response")
 	
 	prompt_text = LLM_PROMPT + "\n" + page_content
 	
-	llm = BedrockChat(
+	llm = ChatBedrock(
 		model_id=LLM_MODEL_ID,
 		model_kwargs={"temperature": 0}  
 	)
 	
-	llm_response = llm.predict(text=prompt_text + "\n" + question)
+	llm_response = llm.invoke(text=prompt_text + "\n" + question)
 	return llm_response
 
 def get_json_from_file(file_path: str) -> dict:
 	"""
 	JSONファイルからデータを読み込む関数。
 	"""
-	print(f"Retrieving JSON data from file: {file_path}")
+	logging.info(f"Retrieving JSON data from file: {file_path}")
 	
 	try:
 		with open(file_path, 'r', encoding='utf-8') as file:
 			json_data = json.load(file)
 		return json_data
 	except Exception as e:
-		print(f"Error in get_json_from_file: {str(e)}")
+		logging.exception(f"Error in get_json_from_file: {str(e)}")
 		return None
 
 def process_question(question: str) -> str:
 	"""
 	一連の処理を統合し、ユーザーの質問に対する最終的な回答を生成する関数。
 	"""
-	print(f"Processing question: {question}")
+	logging.info(f"Processing question: {question}")
 	
 	file_path = '/var/task/documents.json'
 	
-	print("Retrieving JSON data from file...")
+	logging.info("Retrieving JSON data from file...")
 	json_data = get_json_from_file(file_path)
 
 	if json_data is None:
@@ -231,19 +234,19 @@ def process_question(question: str) -> str:
 	rephrase_retriever = RePhraseQueryRetriever(retriever=retriever, llm_chain=query_generator)
 	
 	relevant_documents = rephrase_retriever.get_relevant_documents(question)
-	print("Relevant documents:")
+	logging.info("Relevant documents:")
 	for doc in relevant_documents:
-		print(doc)
+		logging.info(doc)
 	
-	print("Generated query from LLM:")
-	print(rephrase_retriever.llm_chain.invoke(question))
+	logging.info("Generated query from LLM:")
+	logging.info(rephrase_retriever.llm_chain.invoke(question))
 	
 	retriever = vectorize(relevant_documents)
 	
 	final_docs = retriever.get_relevant_documents(question)
-	print("Final documents:")  
+	logging.info("Final documents:")  
 	for doc in final_docs:
-		print(doc)
+		logging.info(doc)
 	
 	if final_docs:
 		page_content = "\n".join([doc.page_content for doc in final_docs])
@@ -256,12 +259,12 @@ def lambda_handler(event, context):
 	"""
 	Slackからのメンション付きの返信を受けて回答する処理を行う関数。
 	"""
-	print(f"Received event: {json.dumps(event)}")
+	logging.info(f"Received event: {json.dumps(event)}")
 
 	headers = event.get('headers', {})
 
 	if 'x-slack-retry-num' in headers:
-		print("Detected x-slack-retry-num. Exiting to avoid processing a retry from Slack.")
+		logging.info("Detected x-slack-retry-num. Exiting to avoid processing a retry from Slack.")
 		return {
 			"statusCode": 200,
 			"body": json.dumps({"message": "Request identified as a retry, thus ignored."})  
